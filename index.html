@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <title>🚗 IoT Gasolina Dashboard</title>
+
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+    <style>
+        .modal-content button {
+            margin-top: 15px;
+            padding: 10px 20px;
+            border: none;
+            background: red;
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        #qrBox {
+            background: white;
+            padding: 10px;
+            border-radius: 10px;
+        }
+
+        /* ================= MODAL ================= */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            justify-content: center;
+            align-items: center;
+            z-index: 999;
+        }
+
+        .modal-content {
+            background: #1e293b;
+            padding: 25px;
+            border-radius: 15px;
+            width: 350px;
+            text-align: center;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+            animation: aparecer 0.3s ease;
+        }
+
+        .modal-content h2 {
+            margin-bottom: 10px;
+        }
+
+        @keyframes aparecer {
+            from {
+                transform: scale(0.7);
+                opacity: 0;
+            }
+
+            to {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        body {
+            margin: 0;
+            font-family: Arial;
+            background: #0f172a;
+            color: white;
+        }
+
+        .header {
+            background: #020617;
+            padding: 15px;
+            text-align: center;
+            font-size: 22px;
+            font-weight: bold;
+        }
+
+        .card {
+            background: #1e293b;
+            margin: 15px;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        button {
+            margin: 5px;
+            padding: 10px;
+            border: none;
+            cursor: pointer;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+
+        .green {
+            background: green;
+            color: white;
+        }
+
+        .red {
+            background: red;
+            color: white;
+        }
+
+        .blue {
+            background: blue;
+            color: white;
+        }
+
+        .purple {
+            background: purple;
+            color: white;
+        }
+
+        canvas {
+            background: #0f172a;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="header">
+        ⛽ Sistema IoT de Detección de Fugas de Gasolina
+    </div>
+
+    <div class="card">
+
+        <div id="qr"></div>
+
+        <h2 id="estado">⏸ Sistema detenido</h2>
+        <p id="conexion">🔌 Conectando...</p>
+        <h3 id="alertas">🚨 Alertas: 0</h3>
+
+        <button class="purple" onclick="generarQR()">📲 QR GITHUB</button>
+    </div>
+
+    <div class="card">
+        <button class="green" onclick="iniciar()">▶ INICIAR</button>
+        <button class="red" onclick="detener()">⏹ DETENER</button>
+        <button class="blue" onclick="detalles()">📘 DETALLES</button>
+        <button onclick="test()">🧪 TEST</button>
+    </div>
+
+    <div class="card">
+        <canvas id="velocimetro" width="500" height="100"></canvas>
+    </div>
+
+    <div class="card">
+        <canvas id="grafica"></canvas>
+    </div>
+
+    <script>
+
+        const BROKER = "wss://test.mosquitto.org:8081/mqtt";
+        const TOPIC = "iot/gasolina/vehiculo1";
+        const UMBRAL = 300;
+
+        let datos = [];
+        let alertas = 0;
+        let simulando = false;
+
+        /* ================= MQTT ================= */
+        const client = mqtt.connect(BROKER);
+
+        client.on("connect", () => {
+            document.getElementById("conexion").innerText = "🟢 Conectado MQTT";
+            client.subscribe(TOPIC);
+        });
+
+        client.on("message", (topic, message) => {
+            let valor = parseFloat(message.toString());
+            if (!isNaN(valor)) procesar(valor);
+        });
+
+        /* ================= SIMULACIÓN ================= */
+        function generarDato() {
+            let valor = Math.floor(Math.random() * 400) + 100;
+
+            client.publish(TOPIC, valor.toString());
+            procesar(valor);
+        }
+
+        setInterval(() => {
+            if (simulando) generarDato();
+        }, 2000);
+
+        /* ================= QR ================= */
+        function generarQR() {
+            document.getElementById("qrModal").style.display = "flex";
+
+            document.getElementById("qrBox").innerHTML = "";
+
+            new QRCode(document.getElementById("qrBox"), {
+                text: "https://johngutierrez300.github.io/Simulacion/",
+                width: 180,
+                height: 180
+            });
+        }
+
+        /* ================= GRAFICA ================= */
+        const ctx = document.getElementById("grafica").getContext("2d");
+
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: "Gasolina",
+                    data: [],
+                    borderColor: "cyan",
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                animation: false,
+                scales: { y: { min: 0, max: 500 } }
+            }
+        });
+
+        /* ================= VELOCÍMETRO ================= */
+        const vctx = document.getElementById("velocimetro").getContext("2d");
+
+        function velocimetro(valor) {
+            vctx.clearRect(0, 0, 500, 100);
+
+            vctx.fillStyle = "green";
+            vctx.fillRect(0, 40, 250, 20);
+
+            vctx.fillStyle = "yellow";
+            vctx.fillRect(250, 40, 50, 20);
+
+            vctx.fillStyle = "red";
+            vctx.fillRect(300, 40, 200, 20);
+
+            let pos = (valor / 500) * 500;
+
+            vctx.fillStyle = "white";
+            vctx.beginPath();
+            vctx.arc(pos, 50, 8, 0, Math.PI * 2);
+            vctx.fill();
+        }
+
+        /* ================= BEEP ================= */
+        function beep() {
+            try {
+                const ctx = new AudioContext();
+                const osc = ctx.createOscillator();
+                osc.frequency.value = 1200;
+                osc.connect(ctx.destination);
+                osc.start();
+                setTimeout(() => osc.stop(), 200);
+            } catch (e) { }
+        }
+
+        /* ================= PROCESAR ================= */
+        function procesar(valor) {
+
+            datos.push(valor);
+            if (datos.length > 25) datos.shift();
+
+            chart.data.labels = datos.map((_, i) => i);
+            chart.data.datasets[0].data = datos;
+            chart.update();
+
+            velocimetro(valor);
+
+            if (valor > UMBRAL) {
+                alertas++;
+                document.getElementById("alertas").innerText = "🚨 Alertas: " + alertas;
+                document.getElementById("estado").innerText = "🚨 FUGA DETECTADA";
+                beep();
+            } else {
+                document.getElementById("estado").innerText = "🟢 Sistema en ejecución";
+            }
+        }
+
+        /* ================= BOTONES ================= */
+        function iniciar() {
+            simulando = true;
+            document.getElementById("estado").innerText = "🟢 Sistema en ejecución";
+        }
+
+        function detener() {
+            simulando = false;
+            document.getElementById("estado").innerText = "⏹ Sistema detenido";
+        }
+
+        function detalles() {
+            document.getElementById("modal").style.display = "flex";
+        }
+
+        function cerrarModal() {
+            document.getElementById("modal").style.display = "none";
+        }
+
+        function cerrarQR() {
+            document.getElementById("qrModal").style.display = "none";
+        }
+
+        function test() {
+            procesar(350);
+        }
+
+    </script>
+
+    <!-- MODAL DETALLES -->
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <h2>📘 DETALLES DEL SISTEMA</h2>
+
+            <p>🔍 Sistema IoT de detección de fugas de gasolina</p>
+
+            <hr>
+
+            <p>📡 MQTT en tiempo real (HiveMQ)</p>
+            <p>📊 Datos entre 100 - 500</p>
+            <p>🚨 Umbral de alerta: 300</p>
+
+            <hr>
+
+            <p>🟢 100 - 250 = Normal</p>
+            <p>🟡 251 - 300 = Precaución</p>
+            <p>🔴 301 - 500 = Peligro</p>
+
+            <button onclick="cerrarModal()">Cerrar</button>
+        </div>
+    </div>
+
+    <!-- QR MODAL -->
+    <div id="qrModal" class="modal" onclick="cerrarQR()">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <h2>📲 QR DEL PROYECTO</h2>
+
+            <div id="qrBox" style="display:flex; justify-content:center; margin:15px 0;"></div>
+
+            <p>Escanea para abrir el sistema IoT</p>
+
+            <button onclick="cerrarQR()">Cerrar</button>
+        </div>
+    </div>
+
+</body>
+
+</html>
